@@ -1,0 +1,99 @@
+				################################################
+				## How to create an ubuntu image using Xen PV ##
+				##			   By MVONDO DJOB 				  ##
+				################################################
+
+
+(1) First of all, you need to create a null file (file only containning zeros) of the size you wish. You can use the dd linux command to do it as follows  :
+
+	dd if=/dev/zero of=vm_disk bs=1024M count=12 
+
+where - vm_disk : the output file
+	  - bs : the size of one block
+	  - count : the number of blocks.
+
+For this example, we create a zero file of 12,28 GB
+
+(2) Next, link with a loop to some special directory (/dev/loop1 here) vm_disk. You can achieve this by using the losetup linux command to do it as follows : 
+
+	losetup /dev/loop1 vm_disk
+
+(3) Next, we shall create a physical volume out of this using the linux command pvcreate 
+
+	pvcreate /dev/loop1
+
+(4) Now we can create a volume group and give it a name. This can be achieved using vgcreate as follows : 
+
+	vgcreate -s 8192 myVolumeGroup /dev/loop1
+
+(5) Now we use lvcreate to  create a logical volume which will be the actual container of our domU (guest OS)
+
+	lvcreate -L 8192 -n mylv myVolumeGroup
+
+(6) Now, your logical volume should be at the directory /dev/myVolumeGroup. You can check it with the command below : 
+
+	ls /dev/myVolumeGroup
+
+(7) Now create the directory /var/lib/xen/images/ubuntu-experi/ (you can choose the name you want). To achieve this, enter : 
+
+	mkdir /var/lib/xen/images/ubuntu-experi
+
+(8) Enter in this directory and erase its content if any : 
+
+	cd /var/lib/xen/images/ubuntu-experi; rm ./*
+
+(9) Now, let's us download the ubuntu image we are going to install. Launch : 
+
+	wget http://archive.ubuntu.com/ubuntu/dists/precise-updates/main/installer-amd64/current/images/netboot/xen/vmlinuz
+
+	wget http://archive.ubuntu.com/ubuntu/dists/precise-updates/main/installer-amd64/current/images/netboot/xen/initrd.gz
+
+(10) Before installing the domU, let us set up the bridge to enable network access in our guest. 
+
+		- Modifier le fichier /etc/network/interfaces avec nano ou vi et ajouter les lignes suivantes 
+
+		(Modifier le iface eth0 inet dhcp à iface eth0 inet manual)
+		auto xenbr0
+		iface xenbr0 inet dhcp 
+			bridge_utils eth0
+	
+		- Rédemarrez le service réseau en tapant /etc/init.d/networking restart.
+
+		- Puis lancer la commande ci-dessous :
+
+			ip link set dev xenbr0 up
+
+		- Rédemarrez à nouveau le service. 
+
+(11) Now let's us create a config file for our domU. Open a file either by using nano or vim.
+
+		vim ubuntu.cfg
+
+(12) Place the following content inside the file 
+
+	############################################
+
+	name = "ubuntu"
+	memory = 1024
+	disk = ['phy:/dev/myVolumeGroup/mylv,xvda,w']
+	vif = ['bridge=xenbr0']
+	kernel = "/var/lib/xen/images/ubuntu-experi/vmlinuz"
+	ramdisk = "/var/lib/xen/images/ubuntu-experi/initrd.gz"
+	extra = "debian-installer/exit/always_halt=true -- console=hvc0"
+
+(13) Now let's create the image and attach a console to it for us to continue the installation
+
+	sudo xl create  -c ubuntu.cfg 
+
+(14) Après l'installation, modifier le fichier ubuntu.cfg pour mettre en commentaire les lignes qui nous ont aidé à installation et ajouter la ligne bootloader="pygrub". Soit votre fichier deviens : 
+
+	###############################################
+
+	name = "ubuntu"
+	memory = 1024
+	disk = ['phy:/dev/myVolumeGroup/mylv,xvda,w']
+	vif = ['bridge=xenbr0']
+	#kernel = "/var/lib/xen/images/ubuntu-experi/vmlinuz"
+	#ramdisk = "/var/lib/xen/images/ubuntu-experi/initrd.gz"
+	#extra = "debian-installer/exit/always_halt=true -- console=hvc0"
+	bootloader = "pygrub"
